@@ -5,9 +5,9 @@ A simple REST API server written in Vlang that provides real-time cryptocurrency
 ## Features
 
 - **Tracked Cryptocurrencies**: XMR (Monero), BNB (Binance Coin), BTC (Bitcoin), DOGE (Dogecoin), XRP (Ripple), POL (Polygon), SOL (Solana)
-- **Exchange Rates**: EUR and THB relative to USD
+- **Exchange Rates**: EUR, THB, and VND relative to USD
 - **Automatic Updates**: Prices fetched every 5 minutes
-- **External APIs**: CoinGecko (crypto) and Coinbase (EUR/USD and THB/USD rates)
+- **External APIs**: CoinGecko (crypto) and Coinbase (EUR/USD, THB/USD, and VND/USD rates)
 - **HTTP Server**: Listens on `0.0.0.0:3040`
 - **Response Format**: JSON
 - **Caching**: Shared JSON file for data persistence
@@ -29,7 +29,8 @@ Returns all current prices in JSON format.
   "POL": 0.111061,
   "SOL": 87.29,
   "EUR": 1.18699,
-  "THB": 0.03226
+  "THB": 0.03226,
+  "VND": 0.0000385
 }
 ```
 
