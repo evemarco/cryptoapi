@@ -4,10 +4,11 @@ This document contains essential information for working with the cryptoapi Vlan
 
 ## Project Overview
 
-A REST API server written in Vlang that provides real-time cryptocurrency prices and exchange rates. The server fetches prices from external APIs (CoinGecko for crypto, Coinbase for EUR/USD and THB/USD) and updates them every 5 minutes.
+A REST API server written in Vlang that provides real-time cryptocurrency prices and exchange rates. The server fetches prices from external APIs (CoinGecko for crypto, Coinbase for EUR/USD, THB/USD, and VND/USD) and updates them every 5 minutes.
 
 **Tech Stack**: Vlang (vweb framework), JSON file-based caching, curl for HTTP requests
 **Listening Port**: 3040 (configurable in `main.v:52`)
+**Executable Name**: `cryptoapi` (built via `./build.sh`)
 
 ## Build & Run Commands
 
@@ -17,14 +18,48 @@ v run main.v
 ```
 
 ### Production Build (optimized)
+**Using build script (recommended):**
+```bash
+./build.sh
+./cryptoapi
+```
+
+**Manual build:**
 ```bash
 v -prod -o cryptoapi main.v
 ./cryptoapi
 ```
 
-### Production Run
+Note: The executable is named `cryptoapi`, not `main`.
+
+### Production Run (without service)
 ```bash
 v -prod run main.v
+# or
+./cryptoapi
+```
+
+### Systemd Service (Production)
+```bash
+# Build
+./build.sh
+
+# Install service
+sudo cp cryptoapi.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable cryptoapi
+sudo systemctl start cryptoapi
+
+# Check status
+sudo systemctl status cryptoapi
+
+# View logs
+sudo journalctl -u cryptoapi -f
+
+# Manage service
+sudo systemctl stop cryptoapi
+sudo systemctl restart cryptoapi
+sudo systemctl disable cryptoapi
 ```
 
 ### Test the API
@@ -46,8 +81,13 @@ curl -i http://localhost:3040/
 - Route handlers (decorated with `@['/path']`)
 - Helper functions (update logic, file I/O, HTTP fetching)
 
+**Build & deployment files**:
+- `build.sh` - Build script that creates the `cryptoapi` executable
+- `cryptoapi.service` - systemd service file for production deployment
+
 **Runtime files**:
 - `/tmp/crypto_prices.json` - cached price data (auto-generated)
+- `cryptoapi` - Compiled executable (created by build script)
 
 ## Code Style & Conventions
 
@@ -222,6 +262,50 @@ prices["JPY"] = 0.0067  // Approximate JPY/USD rate
 - **CoinGecko API**: https://api.coingecko.com/api/v3/simple/price
 - **Coinbase API**: https://api.coinbase.com/v2/exchange-rates
 
+## Systemd Service
+
+For production deployment, a systemd service file is provided (`cryptoapi.service`):
+
+**Installation:**
+```bash
+# Build the executable
+./build.sh
+
+# Copy service file
+sudo cp cryptoapi.service /etc/systemd/system/
+
+# Edit service file if needed (adjust user and paths)
+sudo nano /etc/systemd/system/cryptoapi.service
+
+# Reload systemd
+sudo systemctl daemon-reload
+
+# Enable and start
+sudo systemctl enable cryptoapi
+sudo systemctl start cryptoapi
+```
+
+**Management:**
+```bash
+# Check status
+sudo systemctl status cryptoapi
+
+# View logs
+sudo journalctl -u cryptoapi -f
+
+# Restart service
+sudo systemctl restart cryptoapi
+
+# Stop service
+sudo systemctl stop cryptoapi
+```
+
+**Key service features:**
+- Auto-restart on failure (Restart=always)
+- Auto-start on boot (enabled with systemctl enable)
+- Logs sent to systemd journal
+- 10 second restart delay on failure
+
 ## Gotchas & Common Issues
 
 1. **Port 3040 in use**: Kill existing process with `kill -9 $(lsof -ti:3040)`
@@ -229,6 +313,10 @@ prices["JPY"] = 0.0067  // Approximate JPY/USD rate
 3. **Prices not updating**: Check internet connectivity and API endpoints
 4. **Permission denied on /tmp/**crypto_prices.json**: Check write permissions
 5. **V not found**: Install Vlang from https://github.com/vlang/v
+6. **Missing new currency/rate in API response**: The cache file `/tmp/crypto_prices.json` may contain old data without newly added currencies. After adding new currencies/rates to the code, either:
+   - Delete the cache: `rm /tmp/crypto_prices.json` and restart
+   - Wait 5 minutes for automatic update cycle
+   - Restart the service: `sudo systemctl restart cryptoapi`
 
 ## Module Configuration
 

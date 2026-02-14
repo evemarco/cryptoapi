@@ -79,8 +79,6 @@ fn update_prices_and_write() {
 	// Fetch prices from APIs using curl
 	coingecko_data := fetch_coingecko_prices()
 	coinbase_data := fetch_coinbase_eur()
-	coinbase_thb_data := fetch_coinbase_thb()
-	coinbase_vnd_data := fetch_coinbase_vnd()
 
 	// Parse and store crypto prices
 	if coingecko_data != "" {
@@ -113,36 +111,27 @@ fn update_prices_and_write() {
 		}
 	}
 
-	// Parse EUR rate from Coinbase
+	// Parse EUR, THB, VND rates from Coinbase (single API call)
 	if coinbase_data != "" {
 		if decoded := json.decode(CoinbaseResponse, coinbase_data) {
+			// EUR/USD rate
 			if usd_str := decoded.data.rates["USD"] {
 				prices["EUR"] = usd_str.f64()
 			}
-		} else {
-			log.warn("Failed to parse Coinbase data")
-		}
-	}
-
-	// Parse THB rate from Coinbase
-	if coinbase_thb_data != "" {
-		if decoded := json.decode(CoinbaseResponse, coinbase_thb_data) {
-			if usd_str := decoded.data.rates["USD"] {
-				prices["THB"] = usd_str.f64()
+			// THB/USD rate (convert from EUR base)
+			if thb_str := decoded.data.rates["THB"] {
+				usd_per_eur := decoded.data.rates["USD"].f64()
+				thb_per_eur := thb_str.f64()
+				prices["THB"] = thb_per_eur / usd_per_eur
+			}
+			// VND/USD rate (convert from EUR base)
+			if vnd_str := decoded.data.rates["VND"] {
+				usd_per_eur := decoded.data.rates["USD"].f64()
+				vnd_per_eur := vnd_str.f64()
+				prices["VND"] = vnd_per_eur / usd_per_eur
 			}
 		} else {
-			log.warn("Failed to parse Coinbase THB data")
-		}
-	}
-
-	// Parse VND rate from Coinbase
-	if coinbase_vnd_data != "" {
-		if decoded := json.decode(CoinbaseResponse, coinbase_vnd_data) {
-			if usd_str := decoded.data.rates["USD"] {
-				prices["VND"] = usd_str.f64()
-			}
-		} else {
-			log.warn("Failed to parse Coinbase VND data")
+			log.warn("Failed to parse Coinbase EUR data")
 		}
 	}
 
@@ -199,16 +188,6 @@ fn fetch_coingecko_prices() string {
 
 fn fetch_coinbase_eur() string {
 	url := 'https://api.coinbase.com/v2/exchange-rates?currency=EUR'
-	return curl_get(url)
-}
-
-fn fetch_coinbase_thb() string {
-	url := 'https://api.coinbase.com/v2/exchange-rates?currency=THB'
-	return curl_get(url)
-}
-
-fn fetch_coinbase_vnd() string {
-	url := 'https://api.coinbase.com/v2/exchange-rates?currency=VND'
 	return curl_get(url)
 }
 

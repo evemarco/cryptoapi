@@ -108,6 +108,13 @@ v -prod run main.v
 
 ### Build as a standalone executable
 
+**Using the build script (recommended):**
+```bash
+./build.sh
+./cryptoapi
+```
+
+**Manual build:**
 ```bash
 v -prod -o cryptoapi main.v
 ./cryptoapi
@@ -119,10 +126,7 @@ v -prod -o cryptoapi main.v
 
 ```bash
 # Build
-v -prod -o cryptoapi main.v
-
-# Make executable
-chmod +x cryptoapi
+./build.sh
 
 # Run in background
 ./cryptoapi &
@@ -131,35 +135,50 @@ chmod +x cryptoapi
 curl http://localhost:3040/prices
 ```
 
-### Deployment with systemd (Linux)
+### Deployment with systemd (Linux - Recommended)
 
-Create `/etc/systemd/system/cryptoapi.service`:
-
-```ini
-[Unit]
-Description=CryptoAPI Vlang Server
-After=network.target
-
-[Service]
-Type=simple
-User=your_user
-WorkingDirectory=/path/to/cryptoapi
-ExecStart=/path/to/cryptoapi
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Enable and start the service:
+**Quick setup using provided service file:**
 
 ```bash
+# Build the executable
+./build.sh
+
+# Copy service file to systemd
+sudo cp cryptoapi.service /etc/systemd/system/
+
+# Update the service file if needed (adjust paths/user):
+sudo nano /etc/systemd/system/cryptoapi.service
+
+# Reload systemd and enable service
 sudo systemctl daemon-reload
 sudo systemctl enable cryptoapi
+
+# Start the service
 sudo systemctl start cryptoapi
+
+# Check service status
 sudo systemctl status cryptoapi
+
+# View logs
+sudo journalctl -u cryptoapi -f
 ```
+
+**Service management commands:**
+```bash
+# Stop the service
+sudo systemctl stop cryptoapi
+
+# Restart the service
+sudo systemctl restart cryptoapi
+
+# Disable service from auto-start
+sudo systemctl disable cryptoapi
+```
+
+**The service file (`cryptoapi.service`)** is already provided in the repository. You may need to adjust:
+- `User=root` - Set to your system user if needed
+- `WorkingDirectory=/data/cryptoapi` - Path to the project directory
+- `ExecStart=/data/cryptoapi/cryptoapi` - Path to the executable
 
 ### Deployment with Docker
 

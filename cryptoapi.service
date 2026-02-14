@@ -1,0 +1,17 @@
+[Unit]
+Description=CryptoAPI Vlang Server
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/data/cryptoapi
+ExecStart=/data/cryptoapi/cryptoapi
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=cryptoapi
+
+[Install]
+WantedBy=multi-user.target
