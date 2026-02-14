@@ -79,6 +79,8 @@ fn update_prices_and_write() {
 	// Fetch prices from APIs using curl
 	coingecko_data := fetch_coingecko_prices()
 	coinbase_data := fetch_coinbase_eur()
+	coinbase_thb_data := fetch_coinbase_thb()
+	coinbase_vnd_data := fetch_coinbase_vnd()
 
 	// Parse and store crypto prices
 	if coingecko_data != "" {
@@ -122,6 +124,28 @@ fn update_prices_and_write() {
 		}
 	}
 
+	// Parse THB rate from Coinbase
+	if coinbase_thb_data != "" {
+		if decoded := json.decode(CoinbaseResponse, coinbase_thb_data) {
+			if usd_str := decoded.data.rates["USD"] {
+				prices["THB"] = usd_str.f64()
+			}
+		} else {
+			log.warn("Failed to parse Coinbase THB data")
+		}
+	}
+
+	// Parse VND rate from Coinbase
+	if coinbase_vnd_data != "" {
+		if decoded := json.decode(CoinbaseResponse, coinbase_vnd_data) {
+			if usd_str := decoded.data.rates["USD"] {
+				prices["VND"] = usd_str.f64()
+			}
+		} else {
+			log.warn("Failed to parse Coinbase VND data")
+		}
+	}
+
 	// If fetch failed, use static values
 	if prices.len == 0 {
 		log.warn("API fetch failed, using static values")
@@ -133,6 +157,8 @@ fn update_prices_and_write() {
 		prices["POL"] = 0.1109
 		prices["SOL"] = 87.35
 		prices["EUR"] = 1.1865
+		prices["THB"] = 0.0304
+		prices["VND"] = 0.0000385
 	}
 
 	// Write to file
@@ -173,6 +199,16 @@ fn fetch_coingecko_prices() string {
 
 fn fetch_coinbase_eur() string {
 	url := 'https://api.coinbase.com/v2/exchange-rates?currency=EUR'
+	return curl_get(url)
+}
+
+fn fetch_coinbase_thb() string {
+	url := 'https://api.coinbase.com/v2/exchange-rates?currency=THB'
+	return curl_get(url)
+}
+
+fn fetch_coinbase_vnd() string {
+	url := 'https://api.coinbase.com/v2/exchange-rates?currency=VND'
 	return curl_get(url)
 }
 
