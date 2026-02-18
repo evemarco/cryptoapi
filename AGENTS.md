@@ -176,12 +176,15 @@ fn curl_get(url string) string {
 - Background goroutine updates prices every 5 minutes (`update_interval` constant)
 - Fallback to static values if API fetches fail
 - Updates are written to shared file immediately
+- After local update, prices are sent to Grist via PATCH request
 
 ## Key Constants (configurable in `main.v`)
 
 ```v
 const update_interval = 5 * time.minute  // How often to fetch prices
 const prices_file = '/tmp/crypto_prices.json'  // Where to cache prices
+const grist_api_url = 'http://172.21.0.1:8484/api/docs/pgozipRBTC2UkXzdRM6ixp/tables/Coins/records'  // Grist API endpoint
+const grist_bearer_token = 'your_token_here'  // Bearer token for Grist API authentication
 ```
 
 ## API Endpoints
@@ -255,6 +258,48 @@ if coinbase_jpy_data != "" {
 ```v
 prices["JPY"] = 0.0067  // Approximate JPY/USD rate
 ```
+
+## Grist Integration
+
+The server automatically sends price updates to a Grist table via PATCH requests after each update cycle (every 5 minutes).
+
+**Configuration:**
+- `grist_api_url`: Grist API endpoint for the Coins table
+- `grist_bearer_token`: Bearer token for API authentication
+
+**Data sent to Grist:**
+The `send_to_grist()` function sends 7 records with the following structure:
+- Record 1: BTC with EUR fiat rate
+- Record 2: BNB with THB fiat rate
+- Record 3: XMR with VND fiat rate
+- Records 4-7: DOGE, XRP, POL, SOL (crypto only)
+
+**Response handling:**
+- HTTP 200 with "null" response → Success (logs "Ok")
+- Any other response → Error logged with HTTP code and response body
+
+**Grist request format:**
+```json
+{
+  "records": [
+    {
+      "id": 1,
+      "fields": {
+        "coin": "BTC",
+        "usd": <btc_value>,
+        "fiat": "EUR",
+        "fiat_usd": <eur_value>
+      }
+    },
+    ...
+  ]
+}
+```
+
+**To update Grist configuration:**
+1. Edit `grist_api_url` constant to change the endpoint
+2. Edit `grist_bearer_token` constant to update authentication
+3. Rebuild and restart the service
 
 ## External Dependencies
 

@@ -15,6 +15,8 @@ mut:
 
 const update_interval = 5 * time.minute
 const prices_file = '/tmp/crypto_prices.json'
+const grist_api_url = 'http://172.21.0.1:8484/api/docs/pgozipRBTC2UkXzdRM6ixp/tables/Coins/records'
+const grist_bearer_token = 'c749fb13bb8bbeafb5841d54e4c6c05011aa51c9'
 
 struct PriceData {
 mut:
@@ -166,6 +168,8 @@ fn update_prices_and_write() {
 	for k, v in prices {
 		log.info("${k}: ${v}")
 	}
+
+	send_to_grist(prices)
 }
 
 fn read_prices_from_file() map[string]f64 {
@@ -200,4 +204,110 @@ fn curl_get(url string) string {
 	content := os.read_file(tmp_file) or { '' }
 	os.rm(tmp_file) or {}
 	return content
+}
+
+fn send_to_grist(prices map[string]f64) {
+	btc_value := prices["BTC"] or { 0.0 }
+	bnb_value := prices["BNB"] or { 0.0 }
+	xmr_value := prices["XMR"] or { 0.0 }
+	doge_value := prices["DOGE"] or { 0.0 }
+	xrp_value := prices["XRP"] or { 0.0 }
+	pol_value := prices["POL"] or { 0.0 }
+	sol_value := prices["SOL"] or { 0.0 }
+	eur_value := prices["EUR"] or { 0.0 }
+	thb_value := prices["THB"] or { 0.0 }
+	vnd_value := prices["VND"] or { 0.0 }
+
+	json_payload := '{
+  "records": [
+    {
+      "id": 1,
+      "fields": {
+        "coin": "BTC",
+        "usd": ${btc_value},
+        "fiat": "EUR",
+        "fiat_usd": ${eur_value}
+      }
+    },
+    {
+      "id": 2,
+      "fields": {
+        "coin": "BNB",
+        "usd": ${bnb_value},
+        "fiat": "THB",
+        "fiat_usd": ${thb_value}
+      }
+    },
+    {
+      "id": 3,
+      "fields": {
+        "coin": "XMR",
+        "usd": ${xmr_value},
+        "fiat": "VND",
+        "fiat_usd": ${vnd_value}
+      }
+    },
+    {
+      "id": 4,
+      "fields": {
+        "coin": "DOGE",
+        "usd": ${doge_value},
+        "fiat": null,
+        "fiat_usd": 0.0
+      }
+    },
+    {
+      "id": 5,
+      "fields": {
+        "coin": "XRP",
+        "usd": ${xrp_value},
+        "fiat": null,
+        "fiat_usd": 0.0
+      }
+    },
+    {
+      "id": 6,
+      "fields": {
+        "coin": "POL",
+        "usd": ${pol_value},
+        "fiat": null,
+        "fiat_usd": 0.0
+      }
+    },
+    {
+      "id": 7,
+      "fields": {
+        "coin": "SOL",
+        "usd": ${sol_value},
+        "fiat": null,
+        "fiat_usd": 0.0
+      }
+    }
+  ]
+}'
+
+	pid := os.getpid()
+	tmp_file := '/tmp/grist_payload_${pid}'
+	response_file := '/tmp/grist_response_${pid}'
+	os.write_file(tmp_file, json_payload) or {
+		log.error("Failed to write Grist payload: ${err}")
+		return
+	}
+
+	http_code_file := '/tmp/grist_http_code_${pid}'
+	command := 'curl -X "PATCH" "${grist_api_url}" -H "accept: */*" -H "Authorization: Bearer ${grist_bearer_token}" -H "Content-Type: application/json" -d @${tmp_file} -o ${response_file} -w "%{http_code}" > ${http_code_file}'
+	os.system(command)
+
+	http_code_str := os.read_file(http_code_file) or { '0' }
+	response := os.read_file(response_file) or { '' }
+
+	os.rm(tmp_file) or {}
+	os.rm(response_file) or {}
+	os.rm(http_code_file) or {}
+
+	if http_code_str == '200' && response.trim_space() == 'null' {
+		log.info("Sent prices to Grist: Ok")
+	} else {
+		log.error("Failed to send prices to Grist: HTTP ${http_code_str}, response: ${response}")
+	}
 }
