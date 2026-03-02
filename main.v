@@ -16,11 +16,13 @@ mut:
 const update_interval = 5 * time.minute
 const prices_file = '/tmp/crypto_prices.json'
 const grist_api_url = 'http://172.21.0.1:8484/api/docs/pgozipRBTC2UkXzdRM6ixp/tables/Coins/records'
+const bearer = 'c749fb13bb8bbeafb5841d54e4c6c05011aa51c9'
 
 struct PriceData {
 mut:
 	prices map[string]f64
 	last_update string
+	last_success_update string
 }
 
 struct CoingeckoPrice {
@@ -60,10 +62,16 @@ pub fn (mut app App) index() vweb.Result {
 
 @['/prices']
 pub fn (mut app App) get_prices() vweb.Result {
-	// Read prices from file
-	app.prices = read_prices_from_file()
-	println("Serving ${app.prices.len} prices")
-	return app.json(app.prices)
+	content := os.read_file(prices_file) or {
+		log.error("Failed to read prices file: ${err}")
+		return app.json(PriceData{})
+	}
+
+	if decoded := json.decode(PriceData, content) {
+		return app.json(decoded)
+	}
+
+	return app.json(PriceData{})
 }
 
 fn update_prices_loop() {
@@ -76,6 +84,7 @@ fn update_prices_loop() {
 
 fn update_prices_and_write() {
 	mut prices := map[string]f64{}
+	mut fetch_success := false
 
 	// Fetch prices from APIs using curl
 	coingecko_data := fetch_coingecko_prices()
@@ -107,6 +116,9 @@ fn update_prices_and_write() {
 			if solana := coingecko_map["solana"] {
 				prices["SOL"] = solana.usd
 			}
+			if ethereum := coingecko_map["ethereum"] {
+				prices["ETH"] = ethereum.usd
+			}
 		} else {
 			log.warn("Failed to parse Coingecko data")
 		}
@@ -136,9 +148,22 @@ fn update_prices_and_write() {
 		}
 	}
 
+	// Check if we got valid data from APIs (need at least crypto + fiat)
+	if prices.len >= 10 {
+		fetch_success = true
+	}
+
+	// Read previous last_success_update from file if exists
+	mut prev_last_success := ''
+	if content := os.read_file(prices_file) {
+		if decoded := json.decode(PriceData, content) {
+			prev_last_success = decoded.last_success_update
+		}
+	}
+
 	// If fetch failed, use static values
-	if prices.len == 0 {
-		log.warn("API fetch failed, using static values")
+	if !fetch_success {
+		log.warn("API fetch failed, using static values (not sending to Grist)")
 		prices["XMR"] = 354.77
 		prices["BNB"] = 634.98
 		prices["BTC"] = 69763.00
@@ -149,12 +174,20 @@ fn update_prices_and_write() {
 		prices["EUR"] = 1.1865
 		prices["THB"] = 0.0304
 		prices["VND"] = 0.0000385
+		prices["ETH"] = 1976.84
+	}
+
+	// Determine last_success_update
+	mut last_success_update := prev_last_success
+	if fetch_success {
+		last_success_update = time.now().str()
 	}
 
 	// Write to file
 	data := PriceData{
 		prices: prices
 		last_update: time.now().str()
+		last_success_update: last_success_update
 	}
 
 	json_str := json.encode(data)
@@ -167,8 +200,14 @@ fn update_prices_and_write() {
 	for k, v in prices {
 		log.info("${k}: ${v}")
 	}
+	log.info("Last successful fetch: ${last_success_update}")
 
-	send_to_grist(prices)
+	// Only send to Grist if fetch was successful
+	if fetch_success {
+		send_to_grist(prices, last_success_update)
+	} else {
+		log.warn("Skipping Grist update due to failed API fetch")
+	}
 }
 
 fn read_prices_from_file() map[string]f64 {
@@ -185,7 +224,7 @@ fn read_prices_from_file() map[string]f64 {
 }
 
 fn fetch_coingecko_prices() string {
-	url := 'https://api.coingecko.com/api/v3/simple/price?ids=monero,binancecoin,bitcoin,dogecoin,ripple,polygon-ecosystem-token,solana&vs_currencies=usd'
+	url := 'https://api.coingecko.com/api/v3/simple/price?ids=monero,binancecoin,bitcoin,dogecoin,ripple,polygon-ecosystem-token,solana,ethereum&vs_currencies=usd'
 	return curl_get(url)
 }
 
@@ -205,7 +244,7 @@ fn curl_get(url string) string {
 	return content
 }
 
-fn send_to_grist(prices map[string]f64) {
+fn send_to_grist(prices map[string]f64, last_success_update string) {
 	btc_value := prices["BTC"] or { 0.0 }
 	bnb_value := prices["BNB"] or { 0.0 }
 	xmr_value := prices["XMR"] or { 0.0 }
@@ -213,6 +252,7 @@ fn send_to_grist(prices map[string]f64) {
 	xrp_value := prices["XRP"] or { 0.0 }
 	pol_value := prices["POL"] or { 0.0 }
 	sol_value := prices["SOL"] or { 0.0 }
+	eth_value := prices["ETH"] or { 0.0 }
 	eur_value := 1/prices["EUR"] or { 0.0 }
 	thb_value := prices["THB"] or { 0.0 }
 	vnd_value := prices["VND"] or { 0.0 }
@@ -225,7 +265,8 @@ fn send_to_grist(prices map[string]f64) {
         "coin": "BTC",
         "usd": ${btc_value},
         "fiat": "EUR",
-        "fiat_usd": ${eur_value}
+        "fiat_usd": ${eur_value},
+        "last_success_update": "${last_success_update}"
       }
     },
     {
@@ -234,7 +275,8 @@ fn send_to_grist(prices map[string]f64) {
         "coin": "BNB",
         "usd": ${bnb_value},
         "fiat": "THB",
-        "fiat_usd": ${thb_value}
+        "fiat_usd": ${thb_value},
+        "last_success_update": "${last_success_update}"
       }
     },
     {
@@ -243,7 +285,8 @@ fn send_to_grist(prices map[string]f64) {
         "coin": "XMR",
         "usd": ${xmr_value},
         "fiat": "VND",
-        "fiat_usd": ${vnd_value}
+        "fiat_usd": ${vnd_value},
+        "last_success_update": "${last_success_update}"
       }
     },
     {
@@ -252,7 +295,8 @@ fn send_to_grist(prices map[string]f64) {
         "coin": "DOGE",
         "usd": ${doge_value},
         "fiat": "USD",
-        "fiat_usd": 1.0
+        "fiat_usd": 1.0,
+        "last_success_update": "${last_success_update}"
       }
     },
     {
@@ -261,7 +305,8 @@ fn send_to_grist(prices map[string]f64) {
         "coin": "XRP",
         "usd": ${xrp_value},
         "fiat": null,
-        "fiat_usd": 0.0
+        "fiat_usd": 0.0,
+        "last_success_update": "${last_success_update}"
       }
     },
     {
@@ -270,7 +315,8 @@ fn send_to_grist(prices map[string]f64) {
         "coin": "POL",
         "usd": ${pol_value},
         "fiat": null,
-        "fiat_usd": 0.0
+        "fiat_usd": 0.0,
+        "last_success_update": "${last_success_update}"
       }
     },
     {
@@ -279,7 +325,18 @@ fn send_to_grist(prices map[string]f64) {
         "coin": "SOL",
         "usd": ${sol_value},
         "fiat": null,
-        "fiat_usd": 0.0
+        "fiat_usd": 0.0,
+        "last_success_update": "${last_success_update}"
+      }
+    },
+    {
+      "id": 8,
+      "fields": {
+        "coin": "ETH",
+        "usd": ${eth_value},
+        "fiat": null,
+        "fiat_usd": 0.0,
+        "last_success_update": "${last_success_update}"
       }
     }
   ]
@@ -292,7 +349,7 @@ fn send_to_grist(prices map[string]f64) {
 		return
 	}
 
-	command := 'curl -X "PATCH" "${grist_api_url}" -H "accept: */*" -H "Authorization: Bearer c749fb13bb8bbeafb5841d54e4c6c05011aa51c9" -H "Content-Type: application/json" -d @${tmp_file}'
+	command := 'curl -X "PATCH" "${grist_api_url}" -H "accept: */*" -H "Authorization: Bearer ${bearer}" -H "Content-Type: application/json" -d @${tmp_file}'
 	os.system(command)
 	os.rm(tmp_file) or {}
 

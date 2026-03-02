@@ -176,7 +176,8 @@ fn curl_get(url string) string {
 - Background goroutine updates prices every 5 minutes (`update_interval` constant)
 - Fallback to static values if API fetches fail
 - Updates are written to shared file immediately
-- After local update, prices are sent to Grist via PATCH request
+- Grist is only updated if API fetch was successful (not on static fallback)
+- `last_success_update` tracks the timestamp of the last successful API fetch
 
 ## Key Constants (configurable in `main.v`)
 
@@ -190,23 +191,33 @@ const grist_bearer_token = 'your_token_here'  // Bearer token for Grist API auth
 ## API Endpoints
 
 - `GET /` - Returns all prices (JSON)
-- `GET /prices` - Returns all prices (JSON)
+- `GET /prices` - Returns all prices with metadata (JSON)
 
 Response format:
 ```json
 {
-  "BTC": 69832.0,
-  "BNB": 634.58,
-  "XMR": 355.33,
-  "DOGE": 0.102899,
-  "XRP": 1.47,
-  "POL": 0.111061,
-  "SOL": 87.29,
-  "EUR": 1.18699,
-  "THB": 0.03226,
-  "VND": 0.0000385
+  "prices": {
+    "BTC": 69832.0,
+    "BNB": 634.58,
+    "XMR": 355.33,
+    "DOGE": 0.102899,
+    "XRP": 1.47,
+    "POL": 0.111061,
+    "SOL": 87.29,
+    "ETH": 1976.84,
+    "EUR": 1.18699,
+    "THB": 0.03226,
+    "VND": 0.0000385
+  },
+  "last_update": "2026-03-02 12:48:22",
+  "last_success_update": "2026-03-02 12:48:22"
 }
 ```
+
+**Fields:**
+- `prices`: Map of currency symbols to USD values
+- `last_update`: Timestamp of the last update attempt (successful or not)
+- `last_success_update`: Timestamp of the last successful API fetch (preserved on fallback)
 
 ## Adding New Cryptocurrencies
 
@@ -261,18 +272,20 @@ prices["JPY"] = 0.0067  // Approximate JPY/USD rate
 
 ## Grist Integration
 
-The server automatically sends price updates to a Grist table via PATCH requests after each update cycle (every 5 minutes).
+The server automatically sends price updates to a Grist table via PATCH requests after each successful API fetch (every 5 minutes if APIs respond correctly).
+
+**Important:** Grist is NOT updated when using static fallback values. This ensures Grist only receives fresh, validated data.
 
 **Configuration:**
 - `grist_api_url`: Grist API endpoint for the Coins table
-- `grist_bearer_token`: Bearer token for API authentication
+- `bearer`: Bearer token for API authentication
 
 **Data sent to Grist:**
-The `send_to_grist()` function sends 7 records with the following structure:
+The `send_to_grist()` function sends 8 records with the following structure:
 - Record 1: BTC with EUR fiat rate
 - Record 2: BNB with THB fiat rate
 - Record 3: XMR with VND fiat rate
-- Records 4-7: DOGE, XRP, POL, SOL (crypto only)
+- Records 4-8: DOGE, XRP, POL, SOL, ETH (crypto only)
 
 **Response handling:**
 - HTTP 200 with "null" response → Success (logs "Ok")
@@ -288,7 +301,8 @@ The `send_to_grist()` function sends 7 records with the following structure:
         "coin": "BTC",
         "usd": <btc_value>,
         "fiat": "EUR",
-        "fiat_usd": <eur_value>
+        "fiat_usd": <eur_value>,
+        "last_success_update": "2026-03-02 12:48:22"
       }
     },
     ...
@@ -296,9 +310,16 @@ The `send_to_grist()` function sends 7 records with the following structure:
 }
 ```
 
+**Required Grist columns:**
+- `coin`: Currency symbol (BTC, ETH, etc.)
+- `usd`: USD price value
+- `fiat`: Associated fiat currency (EUR, THB, VND, USD, or null)
+- `fiat_usd`: Fiat to USD exchange rate
+- `last_success_update`: Timestamp of successful data fetch
+
 **To update Grist configuration:**
 1. Edit `grist_api_url` constant to change the endpoint
-2. Edit `grist_bearer_token` constant to update authentication
+2. Edit `bearer` constant to update authentication
 3. Rebuild and restart the service
 
 ## External Dependencies
