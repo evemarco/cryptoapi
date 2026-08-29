@@ -6,8 +6,8 @@ This document contains essential information for working with the cryptoapi Vlan
 
 A REST API server written in Vlang that provides real-time cryptocurrency prices and exchange rates. The server fetches prices from external APIs (CoinGecko for crypto, Coinbase for EUR/USD, THB/USD, and VND/USD) and updates them every 5 minutes.
 
-**Tech Stack**: Vlang (vweb framework), JSON file-based caching, curl for HTTP requests
-**Listening Port**: 3040 (configurable in `main.v:52`)
+**Tech Stack**: Vlang (veb framework), JSON file-based caching, curl for HTTP requests
+**Listening Port**: 3040 (configurable in `config.toml`)
 **Executable Name**: `cryptoapi` (built via `./build.sh`)
 
 ## Build & Run Commands
@@ -101,7 +101,7 @@ curl -i http://localhost:3040/
 ### Naming Conventions
 - **Modules**: lowercase (`module main`)
 - **Structs**: PascalCase (`App`, `PriceData`, `CoingeckoPrice`)
-- **Constants**: snake_case (`update_interval`, `prices_file`)
+- **Constants**: snake_case
 - **Functions**: snake_case (`update_prices_loop`, `fetch_coingecko_prices`)
 - **Mutable struct fields**: marked with `mut:`
 - **Private functions**: no `pub` keyword
@@ -109,27 +109,26 @@ curl -i http://localhost:3040/
 
 ### Vlang Patterns
 
-**Struct definitions**:
+**Struct definitions** (veb model: shared `App` + per-request `Context`):
 ```v
-struct App {
-    vweb.Context
-    mut:
-        prices map[string]f64
-        last_update time.Time
+pub struct App {}
+
+pub struct Context {
+    veb.Context
 }
 ```
 
-**Route handlers** (vweb framework):
+**Route handlers** (veb framework):
 ```v
 @['/route']
-pub fn (mut app App) handler() vweb.Result {
-    return app.json(data)
+pub fn (app &App) handler(mut ctx Context) veb.Result {
+    return ctx.json(data)
 }
 ```
 
-**JSON decoding** (V builtin):
+**JSON decoding** (`json2` module):
 ```v
-if decoded := json.decode(StructType, json_string) {
+if decoded := json2.decode[StructType](json_string) {
     // Success - use decoded
 } else {
     log.warn("Failed to decode JSON")
@@ -165,7 +164,7 @@ fn curl_get(url string) string {
 ## Important Architecture Decisions
 
 ### Shared State Management
-**Problem**: vweb creates new `App` instance per request, so in-memory state isn't shared
+**Context**: price state is not kept in `App`; handlers re-read a shared JSON file on each request
 **Solution**: Use shared JSON file at `/tmp/crypto_prices.json` for data persistence
 
 ### HTTP Requests
@@ -173,20 +172,25 @@ fn curl_get(url string) string {
 **Solution**: Use `curl` via `os.system()` in `curl_get()` function
 
 ### Price Updates
-- Background goroutine updates prices every 5 minutes (`update_interval` constant)
+- Background goroutine updates prices every 5 minutes (`update_interval_seconds` config setting)
 - Fallback to static values if API fetches fail
 - Updates are written to shared file immediately
 - Grist is only updated if API fetch was successful (not on static fallback)
 - `last_success_update` tracks the timestamp of the last successful API fetch
 
-## Key Constants (configurable in `main.v`)
+## Runtime Configuration (`config.toml`)
 
-```v
-const update_interval = 5 * time.minute  // How often to fetch prices
-const prices_file = '/tmp/crypto_prices.json'  // Where to cache prices
-const grist_api_url = 'http://172.21.0.1:8484/api/docs/pgozipRBTC2UkXzdRM6ixp/tables/Coins/records'  // Grist API endpoint
-const grist_bearer_token = 'your_token_here'  // Bearer token for Grist API authentication
+Settings are loaded from `config.toml` in the working directory at startup — no recompile needed. Missing file or missing keys fall back to the defaults declared in the `Config` struct in `main.v`:
+
+```toml
+port = 3040                      # HTTP listen port
+update_interval_seconds = 300    # How often to fetch prices
+prices_file = "/tmp/crypto_prices.json"  # Where to cache prices
+grist_api_url = "https://grist.dedimarco.com/api/docs/pgozipRBTC2UkXzdRM6ixp/tables/Coins/records"
+grist_bearer_token = "your_token_here"   # Bearer token for Grist API authentication
 ```
+
+A malformed `config.toml` aborts startup with an error (exit code 1).
 
 ## API Endpoints
 
@@ -255,7 +259,7 @@ coinbase_jpy_data := fetch_coinbase_jpy()
 3. Parse the response:
 ```v
 if coinbase_jpy_data != "" {
-    if decoded := json.decode(CoinbaseResponse, coinbase_jpy_data) {
+    if decoded := json2.decode[CoinbaseResponse](coinbase_jpy_data) {
         if usd_str := decoded.data.rates["USD"] {
             prices["JPY"] = usd_str.f64()
         }
@@ -277,8 +281,8 @@ The server automatically sends price updates to a Grist table via PATCH requests
 **Important:** Grist is NOT updated when using static fallback values. This ensures Grist only receives fresh, validated data.
 
 **Configuration:**
-- `grist_api_url`: Grist API endpoint for the Coins table
-- `bearer`: Bearer token for API authentication
+- `grist_api_url`: Grist API endpoint for the Coins table (set in `config.toml`)
+- `grist_bearer_token`: Bearer token for API authentication (set in `config.toml`)
 
 **Data sent to Grist:**
 The `send_to_grist()` function sends 8 records with the following structure:
@@ -318,13 +322,13 @@ The `send_to_grist()` function sends 8 records with the following structure:
 - `last_success_update`: Timestamp of successful data fetch
 
 **To update Grist configuration:**
-1. Edit `grist_api_url` constant to change the endpoint
-2. Edit `bearer` constant to update authentication
-3. Rebuild and restart the service
+1. Edit `grist_api_url` in `config.toml` to change the endpoint
+2. Edit `grist_bearer_token` in `config.toml` to update authentication
+3. Restart the service (no rebuild needed)
 
 ## External Dependencies
 
-- **vweb**: V's builtin web framework (imported as `vweb`)
+- **veb**: V's builtin web framework (imported as `veb`)
 - **curl**: System curl binary (for HTTP requests to external APIs)
 - **CoinGecko API**: https://api.coingecko.com/api/v3/simple/price
 - **Coinbase API**: https://api.coinbase.com/v2/exchange-rates
@@ -398,7 +402,7 @@ Module {
 }
 ```
 
-No external V module dependencies - uses only stdlib (vweb, time, log, json, os).
+No external V module dependencies - uses only stdlib (veb, time, log, json2, toml, os).
 
 ## Testing
 

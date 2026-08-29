@@ -36,28 +36,23 @@ Returns all current prices in JSON format.
 
 ## Configuration
 
+Runtime settings live in `config.toml` (in the working directory) — edit and restart the service, no recompile needed. Any missing key falls back to its default value; if the file is missing entirely, all defaults are used.
+
+```toml
+port = 3040                                  # HTTP listen port
+update_interval_seconds = 300                # Price fetch interval, in seconds
+prices_file = "/tmp/crypto_prices.json"      # Price cache file
+grist_api_url = "https://..."                # Grist API endpoint (Coins table)
+grist_bearer_token = "your_token_here"       # Grist API authentication token
+```
+
 ### Change the listening port
 
-Modify the port number in `main.v`:
-
-```v
-vweb.run(app, 3040)  // Replace 3040 with your desired port
-```
+Edit `port` in `config.toml` and restart the service.
 
 ### Change the update interval
 
-Modify the `update_interval` constant in `main.v`:
-
-```v
-const update_interval = 5 * time.minute  // 5 minutes by default
-```
-
-Other examples:
-```v
-const update_interval = 10 * time.minute  // 10 minutes
-const update_interval = 30 * time.second  // 30 seconds
-const update_interval = time.hour          // 1 hour
-```
+Edit `update_interval_seconds` in `config.toml` (e.g. `600` for 10 minutes, `3600` for 1 hour) and restart the service.
 
 ### Change tracked cryptocurrencies
 
@@ -80,13 +75,7 @@ if ethereum := coingecko_map["ethereum"] {
 
 ### Change the cache file
 
-Modify the `prices_file` constant:
-
-```v
-const prices_file = '/tmp/crypto_prices.json'  // Default
-// OR
-const prices_file = './cache/prices.json'     // Local directory
-```
+Edit `prices_file` in `config.toml` (e.g. `prices_file = "./cache/prices.json"` for a local directory) and restart the service.
 
 ## Building
 

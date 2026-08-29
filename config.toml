@@ -1,0 +1,14 @@
+# Configuration de cryptoapi — toute clé absente conserve sa valeur par défaut.
+
+# Port d'écoute du serveur HTTP
+port = 3040
+
+# Intervalle de mise à jour des prix, en secondes
+update_interval_seconds = 300
+
+# Fichier de cache des prix
+prices_file = "/tmp/crypto_prices.json"
+
+# API Grist : mise à jour du tableau Coins après chaque fetch réussi
+grist_api_url = "https://grist.dedimarco.com/api/docs/pgozipRBTC2UkXzdRM6ixp/tables/Coins/records"
+grist_bearer_token = "c749fb13bb8bbeafb5841d54e4c6c05011aa51c9"
