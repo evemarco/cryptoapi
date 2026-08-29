@@ -26,3 +26,6 @@ bin/
 # Server logs
 server.log
 *.log
+
+# oh-my-opencode plugin artifacts
+.omo/
