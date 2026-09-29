@@ -41,7 +41,7 @@ Runtime settings live in `config.toml` (in the working directory) — edit and r
 ```toml
 port = 3040                                  # HTTP listen port
 update_interval_seconds = 300                # Price fetch interval, in seconds
-prices_file = "/tmp/crypto_prices.json"      # Price cache file
+prices_file = "/var/lib/cryptoapi/prices.json" # Price cache file (persistent, kept across restarts)
 grist_api_url = "https://..."                # Grist API endpoint (Coins table)
 grist_bearer_token = "your_token_here"       # Grist API authentication token
 ```
@@ -56,22 +56,13 @@ Edit `update_interval_seconds` in `config.toml` (e.g. `600` for 10 minutes, `360
 
 ### Change tracked cryptocurrencies
 
-Modify the CoinGecko URL in `fetch_coingecko_prices()` and add corresponding structures:
+Prices come from two sources: Coinbase exchange-rates (all cryptos except XMR, delisted there) and Kraken (XMR only). To track another crypto listed on Coinbase, add its ticker to the `coinbase_symbols` const in `main.v`:
 
 ```v
-fn fetch_coingecko_prices() string {
-    url := 'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,dogecoin&vs_currencies=usd'
-    return curl_get(url)
-}
+const coinbase_symbols = ['BTC', 'ETH', 'SOL', 'XRP', 'DOGE', 'BNB', 'POL']
 ```
 
-Then add the parsing in `update_prices_and_write()`:
-
-```v
-if ethereum := coingecko_map["ethereum"] {
-    prices["ETH"] = ethereum.usd
-}
-```
+A fetch cycle only counts as successful (and is pushed to Grist) when every symbol in `crypto_symbols` was freshly fetched, so keep both consts in sync when adding or removing a coin.
 
 ### Change the cache file
 
@@ -288,7 +279,7 @@ The server displays logs in the terminal:
 
 1. **Shared state**: vweb creates a new instance per request → Using a shared JSON file
 2. **HTTPS with V**: V's HTTP module blocks on HTTPS → Using `os.system()` with curl
-3. **Persistence**: Data survives restarts → Cache in `/tmp/crypto_prices.json`
+3. **Persistence**: Data survives restarts → Cache in `/var/lib/cryptoapi/prices.json`
 
 ## Project Structure
 
@@ -330,16 +321,17 @@ sudo yum install curl
 
 ### Prices not updating
 
-Check internet connectivity:
+Check connectivity to the price sources:
 
 ```bash
-curl https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd
+curl 'https://api.coinbase.com/v2/exchange-rates?currency=USD'
+curl 'https://api.kraken.com/0/public/Ticker?pair=XMRUSD'
 ```
 
 Check cache file:
 
 ```bash
-cat /tmp/crypto_prices.json
+cat /var/lib/cryptoapi/prices.json
 ```
 
 ### Error "v: command not found"

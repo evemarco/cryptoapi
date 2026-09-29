@@ -4,6 +4,7 @@ import veb
 import time
 import log
 import json2
+import math
 import os
 import toml
 
@@ -18,7 +19,7 @@ pub struct Context {
 pub struct Config {
 	port                    int    = 3040
 	update_interval_seconds int    = 300
-	prices_file             string = '/tmp/crypto_prices.json'
+	prices_file             string = '/var/lib/cryptoapi/prices.json'
 	grist_api_url           string = 'https://grist.dedimarco.com/api/docs/pgozipRBTC2UkXzdRM6ixp/tables/Coins/records'
 	grist_bearer_token      string = 'c749fb13bb8bbeafb5841d54e4c6c05011aa51c9'
 }
@@ -36,15 +37,20 @@ fn load_config() Config {
 	return cfg
 }
 
+// A fetch cycle only counts as successful (and is pushed to Grist) when every
+// crypto symbol was freshly fetched; fiat rates are secondary and may carry
+// over from the last known values.
+const crypto_symbols = ['BTC', 'BNB', 'XMR', 'DOGE', 'XRP', 'POL', 'SOL', 'ETH']
+
+// Coinbase exchange-rates covers these directly. XMR is delisted from Coinbase
+// and comes from Kraken instead (fetch_kraken_xmr).
+const coinbase_symbols = ['BTC', 'ETH', 'SOL', 'XRP', 'DOGE', 'BNB', 'POL']
+
 struct PriceData {
 mut:
 	prices              map[string]f64
 	last_update         string
 	last_success_update string
-}
-
-struct CoingeckoPrice {
-	usd f64
 }
 
 struct CoinbaseData {
@@ -56,6 +62,15 @@ struct CoinbaseResponse {
 	data CoinbaseData
 }
 
+struct KrakenTicker {
+	c []string // last trade: [price, volume]
+}
+
+struct KrakenResponse {
+	error  []string
+	result map[string]KrakenTicker
+}
+
 fn main() {
 	cfg := load_config()
 	log.info('Starting server on 0.0.0.0:${cfg.port}')
@@ -63,6 +78,10 @@ fn main() {
 	mut app := &App{
 		cfg: cfg
 	}
+
+	// The cache holds the last known prices across restarts, make sure its
+	// directory exists before the first write.
+	os.mkdir_all(os.dir(cfg.prices_file)) or {}
 
 	// Initialize prices and write to file
 	update_prices_and_write(cfg)
@@ -100,108 +119,102 @@ fn update_prices_loop(cfg Config) {
 	}
 }
 
-fn update_prices_and_write(cfg Config) {
-	mut prices := map[string]f64{}
-	mut fetch_success := false
-
-	// Fetch prices from APIs using curl
-	coingecko_data := fetch_coingecko_prices()
-	coinbase_data := fetch_coinbase_eur()
-
-	// Parse and store crypto prices
-	if coingecko_data != '' {
-		// Parse Coingecko JSON: {"bitcoin":{"usd":69801}, ...}
-		if decoded := json2.decode[map[string]CoingeckoPrice](coingecko_data) {
-			coingecko_map := decoded.clone()
-			if bitcoin := coingecko_map['bitcoin'] {
-				prices['BTC'] = bitcoin.usd
-			}
-			if binancecoin := coingecko_map['binancecoin'] {
-				prices['BNB'] = binancecoin.usd
-			}
-			if monero := coingecko_map['monero'] {
-				prices['XMR'] = monero.usd
-			}
-			if dogecoin := coingecko_map['dogecoin'] {
-				prices['DOGE'] = dogecoin.usd
-			}
-			if ripple := coingecko_map['ripple'] {
-				prices['XRP'] = ripple.usd
-			}
-			if polygon := coingecko_map['polygon-ecosystem-token'] {
-				prices['POL'] = polygon.usd
-			}
-			if solana := coingecko_map['solana'] {
-				prices['SOL'] = solana.usd
-			}
-			if ethereum := coingecko_map['ethereum'] {
-				prices['ETH'] = ethereum.usd
-			}
-		} else {
-			log.warn('Failed to parse Coingecko data')
-		}
+// Used only before the first successful fetch ever (missing or unreadable
+// cache file); live updates never reset to these values. Key directions follow
+// the live fetch code: 'EUR' is USD per 1 EUR, 'THB' and 'VND' are units of
+// fiat per 1 USD.
+fn static_fallback_prices() map[string]f64 {
+	return {
+		'BTC':  69763.0
+		'ETH':  1976.84
+		'XMR':  354.77
+		'BNB':  634.98
+		'SOL':  87.35
+		'XRP':  1.47
+		'DOGE': 0.1028
+		'POL':  0.1109
+		'EUR':  1.1865
+		'THB':  32.89
+		'VND':  25974.0
 	}
+}
 
-	// Parse EUR, THB, VND rates from Coinbase (single API call)
-	if coinbase_data != '' {
-		if decoded := json2.decode[CoinbaseResponse](coinbase_data) {
-			// EUR/USD rate
-			if usd_str := decoded.data.rates['USD'] {
-				prices['EUR'] = usd_str.f64()
-			}
-			// THB/USD rate (convert from EUR base)
-			if thb_str := decoded.data.rates['THB'] {
-				usd_per_eur := decoded.data.rates['USD'].f64()
-				thb_per_eur := thb_str.f64()
-				prices['THB'] = thb_per_eur / usd_per_eur
-			}
-			// VND/USD rate (convert from EUR base)
-			if vnd_str := decoded.data.rates['VND'] {
-				usd_per_eur := decoded.data.rates['USD'].f64()
-				vnd_per_eur := vnd_str.f64()
-				prices['VND'] = vnd_per_eur / usd_per_eur
-			}
-		} else {
-			log.warn('Failed to parse Coinbase EUR data')
-		}
-	}
-
-	// Check if we got valid data from APIs (need at least crypto + fiat)
-	if prices.len >= 10 {
-		fetch_success = true
-	}
-
-	// Read previous last_success_update from file if exists
-	mut prev_last_success := ''
-	if content := os.read_file(cfg.prices_file) {
+fn read_previous_prices(path string) PriceData {
+	if content := os.read_file(path) {
 		if decoded := json2.decode[PriceData](content) {
-			prev_last_success = decoded.last_success_update
+			return decoded
+		}
+		log.warn('Failed to parse prices cache ${path}, ignoring previous values')
+	}
+	return PriceData{}
+}
+
+// Round to 6 significant digits, clamped to 2–6 decimals. Finer precision is
+// float noise from the 1/rate inversions, not real market data; the 2-decimal
+// floor keeps familiar cent-precision on large values (BTC, VND, ...).
+fn round_price(v f64) f64 {
+	if v == 0 {
+		return 0
+	}
+	mut decimals := 5 - int(math.floor(math.log10(math.abs(v))))
+	if decimals < 2 {
+		decimals = 2
+	}
+	if decimals > 6 {
+		decimals = 6
+	}
+	factor := math.pow(10, f64(decimals))
+	return math.round(v * factor) / factor
+}
+
+fn update_prices_and_write(cfg Config) {
+	// Start from the last known values: on a failed or incomplete fetch they
+	// are kept and re-served instead of resetting to hard-coded prices.
+	prev := read_previous_prices(cfg.prices_file)
+	mut prices := prev.prices.clone()
+
+	mut fresh := map[string]f64{}
+
+	coinbase_prices := fetch_coinbase_prices()
+	for k, v in coinbase_prices {
+		fresh[k] = v
+	}
+
+	xmr := fetch_kraken_xmr()
+	if xmr > 0 {
+		fresh['XMR'] = xmr
+	}
+
+	fiat_prices := fetch_fiat_prices()
+	for k, v in fiat_prices {
+		fresh[k] = v
+	}
+
+	mut fresh_crypto := 0
+	for sym in crypto_symbols {
+		if sym in fresh {
+			fresh_crypto++
 		}
 	}
+	fetch_success := fresh_crypto == crypto_symbols.len
 
-	// If fetch failed, use static values
 	if !fetch_success {
-		log.warn('API fetch failed, using static values (not sending to Grist)')
-		prices['XMR'] = 354.77
-		prices['BNB'] = 634.98
-		prices['BTC'] = 69763.00
-		prices['DOGE'] = 0.1028
-		prices['XRP'] = 1.47
-		prices['POL'] = 0.1109
-		prices['SOL'] = 87.35
-		prices['EUR'] = 1.1865
-		prices['THB'] = 0.0304
-		prices['VND'] = 0.0000385
-		prices['ETH'] = 1976.84
+		if prev.prices.len == 0 {
+			log.warn('API fetch failed with no previous prices, using static fallback values')
+			prices = static_fallback_prices()
+		} else {
+			log.warn('API fetch incomplete (${fresh_crypto}/${crypto_symbols.len} crypto fresh), keeping last known prices from ${prev.last_success_update}')
+		}
+	}
+	for k, v in fresh {
+		prices[k] = v
 	}
 
-	// Determine last_success_update
-	mut last_success_update := prev_last_success
+	mut last_success_update := prev.last_success_update
 	if fetch_success {
 		last_success_update = time.now().str()
 	}
 
-	// Write to file
 	data := PriceData{
 		prices:              prices
 		last_update:         time.now().str()
@@ -220,7 +233,6 @@ fn update_prices_and_write(cfg Config) {
 	}
 	log.info('Last successful fetch: ${last_success_update}')
 
-	// Only send to Grist if fetch was successful
 	if fetch_success {
 		send_to_grist(cfg, prices, last_success_update)
 	} else {
@@ -228,25 +240,95 @@ fn update_prices_and_write(cfg Config) {
 	}
 }
 
-fn fetch_coingecko_prices() string {
-	url := 'https://api.coingecko.com/api/v3/simple/price?ids=monero,binancecoin,bitcoin,dogecoin,ripple,polygon-ecosystem-token,solana,ethereum&vs_currencies=usd'
-	return curl_get(url)
+// Coinbase returns units of crypto per 1 USD, so invert to get the price.
+fn fetch_coinbase_prices() map[string]f64 {
+	mut prices := map[string]f64{}
+	body := curl_get('https://api.coinbase.com/v2/exchange-rates?currency=USD')
+	if body == '' {
+		return prices
+	}
+	decoded := json2.decode[CoinbaseResponse](body) or {
+		log.warn('Failed to parse Coinbase USD data')
+		return prices
+	}
+	for sym in coinbase_symbols {
+		if rate_str := decoded.data.rates[sym] {
+			rate := rate_str.f64()
+		if rate > 0 {
+			prices[sym] = round_price(1.0 / rate)
+		}
+		}
+	}
+	return prices
 }
 
-fn fetch_coinbase_eur() string {
-	url := 'https://api.coinbase.com/v2/exchange-rates?currency=EUR'
-	return curl_get(url)
+fn fetch_kraken_xmr() f64 {
+	body := curl_get('https://api.kraken.com/0/public/Ticker?pair=XMRUSD')
+	if body == '' {
+		return 0.0
+	}
+	decoded := json2.decode[KrakenResponse](body) or {
+		log.warn('Failed to parse Kraken XMR data')
+		return 0.0
+	}
+	if decoded.error.len > 0 {
+		log.warn('Kraken API error: ${decoded.error[0]}')
+		return 0.0
+	}
+	if ticker := decoded.result['XXMRZUSD'] {
+		if ticker.c.len > 0 {
+			return round_price(ticker.c[0].f64())
+		}
+	}
+	log.warn('Kraken response missing XMR ticker')
+	return 0.0
 }
 
+// Fiat rates from the EUR-base Coinbase response. 'EUR' is stored as USD per
+// 1 EUR; 'THB' and 'VND' are units of fiat per 1 USD.
+fn fetch_fiat_prices() map[string]f64 {
+	mut prices := map[string]f64{}
+	body := curl_get('https://api.coinbase.com/v2/exchange-rates?currency=EUR')
+	if body == '' {
+		return prices
+	}
+	decoded := json2.decode[CoinbaseResponse](body) or {
+		log.warn('Failed to parse Coinbase EUR data')
+		return prices
+	}
+	if usd_str := decoded.data.rates['USD'] {
+		usd_per_eur := usd_str.f64()
+		if usd_per_eur > 0 {
+			prices['EUR'] = round_price(usd_per_eur)
+			if thb_str := decoded.data.rates['THB'] {
+				prices['THB'] = round_price(thb_str.f64() / usd_per_eur)
+			}
+			if vnd_str := decoded.data.rates['VND'] {
+				prices['VND'] = round_price(vnd_str.f64() / usd_per_eur)
+			}
+		}
+	}
+	return prices
+}
+
+// -f makes curl fail on HTTP >= 400 (a 403 error page no longer parses as
+// broken JSON silently), -m bounds the request time.
 fn curl_get(url string) string {
-	// Use process ID to generate unique filename
 	pid := os.getpid()
 	tmp_file := '/tmp/curl_response_${pid}'
-	command := 'curl -s "${url}" > "${tmp_file}"'
-	os.system(command)
-	content := os.read_file(tmp_file) or { '' }
-	os.rm(tmp_file) or {}
-	return content
+	err_file := '/tmp/curl_error_${pid}'
+	defer {
+		os.rm(tmp_file) or {}
+		os.rm(err_file) or {}
+	}
+	command := 'curl -fsS -m 20 "${url}" -o "${tmp_file}" 2> "${err_file}"'
+	exit_code := os.system(command)
+	if exit_code != 0 {
+		err_msg := os.read_file(err_file) or { '' }
+		log.error('curl exit ${exit_code} for ${url}: ${err_msg.trim_space()}')
+		return ''
+	}
+	return os.read_file(tmp_file) or { '' }
 }
 
 fn send_to_grist(cfg Config, prices map[string]f64, last_success_update string) {
@@ -258,7 +340,7 @@ fn send_to_grist(cfg Config, prices map[string]f64, last_success_update string) 
 	pol_value := prices['POL'] or { 0.0 }
 	sol_value := prices['SOL'] or { 0.0 }
 	eth_value := prices['ETH'] or { 0.0 }
-	eur_value := 1 / prices['EUR'] or { 0.0 }
+	eur_value := round_price(1 / prices['EUR'] or { 0.0 })
 	thb_value := prices['THB'] or { 0.0 }
 	vnd_value := prices['VND'] or { 0.0 }
 
@@ -354,9 +436,15 @@ fn send_to_grist(cfg Config, prices map[string]f64, last_success_update string) 
 		return
 	}
 
-	command := 'curl -X "PATCH" "${cfg.grist_api_url}" -H "accept: */*" -H "Authorization: Bearer ${cfg.grist_bearer_token}" -H "Content-Type: application/json" -d @${tmp_file}'
-	os.system(command)
+	err_file := '/tmp/grist_error_${pid}'
+	command := 'curl -fsS -X "PATCH" "${cfg.grist_api_url}" -H "accept: */*" -H "Authorization: Bearer ${cfg.grist_bearer_token}" -H "Content-Type: application/json" -d @${tmp_file} -o /dev/null 2> "${err_file}"'
+	exit_code := os.system(command)
+	if exit_code != 0 {
+		err_msg := os.read_file(err_file) or { '' }
+		log.error('Grist update failed (curl exit ${exit_code}): ${err_msg.trim_space()}')
+	} else {
+		log.info('Sent prices to Grist')
+	}
 	os.rm(tmp_file) or {}
-
-	log.info('Sent prices to Grist')
+	os.rm(err_file) or {}
 }

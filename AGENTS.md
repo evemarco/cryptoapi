@@ -86,7 +86,7 @@ curl -i http://localhost:3040/
 - `cryptoapi.service` - systemd service file for production deployment
 
 **Runtime files**:
-- `/tmp/crypto_prices.json` - cached price data (auto-generated)
+- `/var/lib/cryptoapi/prices.json` - cached price data (auto-generated)
 - `cryptoapi` - Compiled executable (created by build script)
 
 ## Code Style & Conventions
@@ -100,9 +100,9 @@ curl -i http://localhost:3040/
 
 ### Naming Conventions
 - **Modules**: lowercase (`module main`)
-- **Structs**: PascalCase (`App`, `PriceData`, `CoingeckoPrice`)
+- **Structs**: PascalCase (`App`, `PriceData`, `KrakenTicker`)
 - **Constants**: snake_case
-- **Functions**: snake_case (`update_prices_loop`, `fetch_coingecko_prices`)
+- **Functions**: snake_case (`update_prices_loop`, `fetch_coinbase_prices`)
 - **Mutable struct fields**: marked with `mut:`
 - **Private functions**: no `pub` keyword
 - **Public functions**: `pub` keyword
@@ -165,7 +165,7 @@ fn curl_get(url string) string {
 
 ### Shared State Management
 **Context**: price state is not kept in `App`; handlers re-read a shared JSON file on each request
-**Solution**: Use shared JSON file at `/tmp/crypto_prices.json` for data persistence
+**Solution**: Use shared JSON file at `/var/lib/cryptoapi/prices.json` for data persistence
 
 ### HTTP Requests
 **Problem**: V's HTTP module blocks on HTTPS requests
@@ -173,9 +173,9 @@ fn curl_get(url string) string {
 
 ### Price Updates
 - Background goroutine updates prices every 5 minutes (`update_interval_seconds` config setting)
-- Fallback to static values if API fetches fail
+- On failed or incomplete API fetch, keep the last known values (from the cache file); static fallback values are only used before the first successful fetch ever
 - Updates are written to shared file immediately
-- Grist is only updated if API fetch was successful (not on static fallback)
+- Grist is only updated if API fetch was successful (not on last known / static fallback)
 - `last_success_update` tracks the timestamp of the last successful API fetch
 
 ## Runtime Configuration (`config.toml`)
@@ -185,7 +185,7 @@ Settings are loaded from `config.toml` in the working directory at startup — n
 ```toml
 port = 3040                      # HTTP listen port
 update_interval_seconds = 300    # How often to fetch prices
-prices_file = "/tmp/crypto_prices.json"  # Where to cache prices
+prices_file = "/var/lib/cryptoapi/prices.json"  # Where to cache prices
 grist_api_url = "https://grist.dedimarco.com/api/docs/pgozipRBTC2UkXzdRM6ixp/tables/Coins/records"
 grist_bearer_token = "your_token_here"   # Bearer token for Grist API authentication
 ```
@@ -225,19 +225,18 @@ Response format:
 
 ## Adding New Cryptocurrencies
 
-1. Update `fetch_coingecko_prices()` URL to include new coin IDs:
+1. If the coin is listed on Coinbase, add its ticker to the `coinbase_symbols` const in `main.v`:
 ```v
-url := 'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,...&vs_currencies=usd'
+const coinbase_symbols = ['BTC', 'ETH', 'SOL', 'XRP', 'DOGE', 'BNB', 'POL']
+```
+For a coin not on Coinbase (like XMR), add a dedicated fetch function (see `fetch_kraken_xmr`).
+
+2. Add the symbol to `crypto_symbols` too — a fetch cycle only counts as successful when every symbol in that const was freshly fetched:
+```v
+const crypto_symbols = ['BTC', 'BNB', 'XMR', 'DOGE', 'XRP', 'POL', 'SOL', 'ETH']
 ```
 
-2. Add parsing logic in `update_prices_and_write()`:
-```v
-if ethereum := coingecko_map["ethereum"] {
-    prices["ETH"] = ethereum.usd
-}
-```
-
-3. Optionally add static fallback values in the fallback block
+3. Optionally add a value in `static_fallback_prices()` (only used before the first successful fetch ever)
 
 ## Adding New Exchange Rates
 
@@ -269,16 +268,16 @@ if coinbase_jpy_data != "" {
 }
 ```
 
-4. Add a static fallback value in the fallback block:
+4. Add a static fallback value in `static_fallback_prices()`:
 ```v
-prices["JPY"] = 0.0067  // Approximate JPY/USD rate
+'JPY': 0.0067  // Approximate JPY/USD rate
 ```
 
 ## Grist Integration
 
 The server automatically sends price updates to a Grist table via PATCH requests after each successful API fetch (every 5 minutes if APIs respond correctly).
 
-**Important:** Grist is NOT updated when using static fallback values. This ensures Grist only receives fresh, validated data.
+**Important:** Grist is NOT updated when the fetch is incomplete or failed; in that case the last known values are kept in the cache and served. Static fallback values are only used before the first successful fetch ever.
 
 **Configuration:**
 - `grist_api_url`: Grist API endpoint for the Coins table (set in `config.toml`)
@@ -330,7 +329,7 @@ The `send_to_grist()` function sends 8 records with the following structure:
 
 - **veb**: V's builtin web framework (imported as `veb`)
 - **curl**: System curl binary (for HTTP requests to external APIs)
-- **CoinGecko API**: https://api.coingecko.com/api/v3/simple/price
+- **Coinbase API**: https://api.coinbase.com/v2/exchange-rates (crypto USD + fiat EUR base) and **Kraken API**: https://api.kraken.com/0/public/Ticker (XMR)
 - **Coinbase API**: https://api.coinbase.com/v2/exchange-rates
 
 ## Systemd Service
@@ -384,8 +383,8 @@ sudo systemctl stop cryptoapi
 3. **Prices not updating**: Check internet connectivity and API endpoints
 4. **Permission denied on /tmp/**crypto_prices.json**: Check write permissions
 5. **V not found**: Install Vlang from https://github.com/vlang/v
-6. **Missing new currency/rate in API response**: The cache file `/tmp/crypto_prices.json` may contain old data without newly added currencies. After adding new currencies/rates to the code, either:
-   - Delete the cache: `rm /tmp/crypto_prices.json` and restart
+6. **Missing new currency/rate in API response**: The cache file `/var/lib/cryptoapi/prices.json` may contain old data without newly added currencies. After adding new currencies/rates to the code, either:
+   - Delete the cache: `rm /var/lib/cryptoapi/prices.json` and restart
    - Wait 5 minutes for automatic update cycle
    - Restart the service: `sudo systemctl restart cryptoapi`
 
@@ -412,7 +411,7 @@ No formal test suite currently. Manual testing via curl:
 curl http://localhost:3040/prices
 
 # Check cache file
-cat /tmp/crypto_prices.json
+cat /var/lib/cryptoapi/prices.json
 
 # Check logs (stdout/stderr from running server)
 ```

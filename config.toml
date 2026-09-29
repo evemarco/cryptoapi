@@ -6,8 +6,9 @@ port = 3040
 # Intervalle de mise à jour des prix, en secondes
 update_interval_seconds = 300
 
-# Fichier de cache des prix
-prices_file = "/tmp/crypto_prices.json"
+# Fichier de cache des prix (hors /tmp : survit aux redémarrages et reboots,
+# sert de dernières valeurs connues si un fetch échoue)
+prices_file = "/var/lib/cryptoapi/prices.json"
 
 # API Grist : mise à jour du tableau Coins après chaque fetch réussi
 grist_api_url = "https://grist.dedimarco.com/api/docs/pgozipRBTC2UkXzdRM6ixp/tables/Coins/records"
