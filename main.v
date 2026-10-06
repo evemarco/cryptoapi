@@ -75,6 +75,11 @@ struct KrakenResponse {
 fn main() {
 	cfg := load_config()
 	log.info('Starting server on 0.0.0.0:${cfg.port}')
+	if grist_enabled(cfg) {
+		log.info('Grist sync enabled')
+	} else {
+		log.warn('Grist sync disabled: set grist_api_url and grist_bearer_token in config.toml to enable it')
+	}
 
 	mut app := &App{
 		cfg: cfg
@@ -234,6 +239,11 @@ fn update_prices_and_write(cfg Config) {
 	}
 	log.info('Last successful fetch: ${last_success_update}')
 
+	if !grist_enabled(cfg) {
+		// Grist sync disabled in config; a single notice is logged at startup.
+		return
+	}
+
 	if fetch_success {
 		send_to_grist(cfg, prices, last_success_update)
 	} else {
@@ -332,11 +342,14 @@ fn curl_get(url string) string {
 	return os.read_file(tmp_file) or { '' }
 }
 
+// Grist sync is optional: it only runs when both the endpoint and the bearer
+// token are set in config.toml. When disabled, the update cycle stays silent —
+// a single notice is logged once at startup.
+fn grist_enabled(cfg Config) bool {
+	return cfg.grist_api_url != '' && cfg.grist_bearer_token != ''
+}
+
 fn send_to_grist(cfg Config, prices map[string]f64, last_success_update string) {
-	if cfg.grist_bearer_token == '' {
-		log.error('Grist bearer token not configured (set grist_bearer_token in config.toml), skipping Grist update')
-		return
-	}
 	btc_value := prices['BTC'] or { 0.0 }
 	bnb_value := prices['BNB'] or { 0.0 }
 	xmr_value := prices['XMR'] or { 0.0 }

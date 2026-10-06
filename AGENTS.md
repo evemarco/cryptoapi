@@ -281,7 +281,9 @@ The server automatically sends price updates to a Grist table via PATCH requests
 
 **Configuration:**
 - `grist_api_url`: Grist API endpoint for the Coins table (set in `config.toml`)
-- `grist_bearer_token`: Bearer token for API authentication (set in `config.toml`, which is gitignored; if empty, Grist updates are skipped with an error logged)
+- `grist_bearer_token`: Bearer token for API authentication (set in `config.toml`, which is gitignored)
+
+**Grist is optional:** when `grist_api_url` or `grist_bearer_token` is empty (`grist_enabled()`), sync is disabled — a single startup notice is logged (`Grist sync disabled`), the update cycle stays silent. When configured, failures are logged but never affect the prices cache.
 
 **Data sent to Grist:**
 The `send_to_grist()` function sends 8 records with the following structure:

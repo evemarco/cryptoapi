@@ -87,7 +87,7 @@ After each successful fetch, the server sends a PATCH with 8 records to the Gris
 
 Every record carries `last_success_update`. Required columns in the Grist table: `coin`, `usd`, `fiat`, `fiat_usd`, `last_success_update`. A failed Grist call is logged but does not affect the prices cache.
 
-The bearer token lives only in the gitignored `config.toml` (never in source code). If it is missing or empty, Grist updates are skipped with an error logged.
+The bearer token lives only in the gitignored `config.toml` (never in source code). **Grist is optional**: when `grist_api_url` or `grist_bearer_token` is not set, sync is disabled — a single notice is logged at startup and the update cycle stays silent. When configured, Grist failures are logged but never affect the prices cache or the API.
 
 ## Configuration
 
