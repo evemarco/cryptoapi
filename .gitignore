@@ -32,3 +32,4 @@ server.log
 
 # Local runtime config — contains the Grist bearer token, never push it
 config.toml
+config.toml.save*
