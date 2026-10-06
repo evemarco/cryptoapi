@@ -30,6 +30,9 @@ server.log
 # oh-my-opencode plugin artifacts
 .omo/
 
+# Mimosa security-scan local state
+.mimosa/
+
 # Local runtime config — contains the Grist bearer token, never push it
 config.toml
 config.toml.save*
