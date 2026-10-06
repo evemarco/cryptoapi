@@ -1,38 +1,91 @@
 # CryptoAPI Vlang REST API
 
-A simple REST API server written in Vlang that provides real-time cryptocurrency prices relative to the US Dollar (USD).
+A simple REST API server written in Vlang that provides real-time cryptocurrency prices and fiat exchange rates relative to the US Dollar (USD).
 
 ## Features
 
-- **Tracked Cryptocurrencies**: XMR (Monero), BNB (Binance Coin), BTC (Bitcoin), DOGE (Dogecoin), XRP (Ripple), POL (Polygon), SOL (Solana)
-- **Exchange Rates**: EUR, THB, and VND relative to USD
-- **Automatic Updates**: Prices fetched every 5 minutes
-- **External APIs**: CoinGecko (crypto) and Coinbase (EUR/USD, THB/USD, and VND/USD rates)
+- **Tracked Cryptocurrencies**: BTC, ETH, XMR (Monero), BNB, SOL, XRP, DOGE, POL
+- **Exchange Rates**: EUR (USD per 1 EUR), THB and VND (fiat per 1 USD)
+- **Automatic Updates**: Prices fetched every 5 minutes by default (configurable)
+- **External APIs**: Coinbase (crypto USD prices + fiat rates) and Kraken (XMR only)
+- **Resilience**: On a failed or incomplete fetch, the last known prices are served instead of stale hard-coded values
+- **Grist Sync**: Prices pushed to a Grist table after every successful fetch
 - **HTTP Server**: Listens on `0.0.0.0:3040`
 - **Response Format**: JSON
-- **Caching**: Shared JSON file for data persistence
+- **Caching**: Persistent JSON cache file (last known values survive restarts and reboots)
 
 ## Endpoints
 
 ### `GET /` or `GET /prices`
 
-Returns all current prices in JSON format.
+Returns all current prices with metadata (both routes are identical).
 
 **Example response:**
 ```json
 {
-  "BTC": 69832.0,
-  "BNB": 634.58,
-  "XMR": 355.33,
-  "DOGE": 0.102899,
-  "XRP": 1.47,
-  "POL": 0.111061,
-  "SOL": 87.29,
-  "EUR": 1.18699,
-  "THB": 0.03226,
-  "VND": 0.0000385
+  "prices": {
+    "BTC": 85601.37,
+    "BNB": 781.33,
+    "XMR": 561.93,
+    "DOGE": 0.09486,
+    "XRP": 1.5006,
+    "POL": 0.10915,
+    "SOL": 120.07,
+    "ETH": 2701.17,
+    "EUR": 1.1217,
+    "THB": 33.664,
+    "VND": 25991.49
+  },
+  "last_update": "2026-10-06 05:02:54",
+  "last_success_update": "2026-10-06 05:02:54"
 }
 ```
+
+**Fields:**
+- `prices`: Map of currency symbols to values (see semantics below)
+- `last_update`: Timestamp of the last update attempt (successful or not)
+- `last_success_update`: Timestamp of the last successful API fetch — compare it with `last_update` to detect a degraded feed
+
+## Data Sources
+
+| Source | Used for | Endpoint |
+|---|---|---|
+| Coinbase exchange-rates | Crypto USD prices (BTC, ETH, SOL, XRP, DOGE, BNB, POL) and fiat rates (EUR, THB, VND) | `https://api.coinbase.com/v2/exchange-rates?currency=USD` and `?currency=EUR` |
+| Kraken ticker | XMR (delisted from Coinbase) | `https://api.kraken.com/0/public/Ticker?pair=XMRUSD` |
+
+**Price semantics** (directions follow the live fetch code):
+
+- Crypto: Coinbase returns units of crypto per 1 USD; the value is inverted, so `prices["BTC"]` is USD per 1 BTC.
+- `EUR`: USD per 1 EUR (e.g. `1.1217`).
+- `THB`, `VND`: units of fiat per 1 USD (e.g. `33.664` THB per USD), derived from the EUR-base Coinbase response.
+- XMR comes from Kraken's last trade price (`c[0]`).
+- All values are rounded to 6 significant digits, clamped to 2–6 decimals, to remove float noise from the inversions.
+
+### Why Coinbase + Kraken instead of CoinGecko?
+
+The server runs in a datacenter, and CoinGecko's public REST API started rejecting requests coming from it (HTTP 403 error pages, which the old code silently parsed as broken JSON). The sources were therefore switched to Coinbase (crypto + fiat) and Kraken (XMR, which Coinbase no longer lists). HTTP errors are now detected and logged (`curl -fsS` with exit-code checks) instead of being parsed as data.
+
+## Update & Fallback Behavior
+
+- A background goroutine refreshes prices every `update_interval_seconds` (default `300`), plus once at startup.
+- A fetch cycle counts as **successful** only when every symbol in `crypto_symbols` (8 coins) was freshly fetched. Fiat rates are secondary and may carry over from the last known values.
+- **On failure or incomplete fetch**: the last known values from the cache file are kept and re-served; a warning is logged.
+- **Static fallback values** (hard-coded in `main.v`) are used only before the first successful fetch ever (missing or unreadable cache file). Live updates never reset to them.
+- **Grist is updated only on a fully successful fetch.**
+
+## Grist Integration
+
+After each successful fetch, the server sends a PATCH with 8 records to the Grist `Coins` table (`grist_api_url` in `config.toml`):
+
+| Record | coin | fiat | fiat_usd |
+|---|---|---|---|
+| 1 | BTC | EUR | 1 / EUR rate |
+| 2 | BNB | THB | THB rate |
+| 3 | XMR | VND | VND rate |
+| 4 | DOGE | USD | 1.0 |
+| 5–8 | XRP, POL, SOL, ETH | null | 0.0 |
+
+Every record carries `last_success_update`. Required columns in the Grist table: `coin`, `usd`, `fiat`, `fiat_usd`, `last_success_update`. A failed Grist call is logged but does not affect the prices cache.
 
 ## Configuration
 
@@ -72,7 +125,7 @@ Edit `prices_file` in `config.toml` (e.g. `prices_file = "./cache/prices.json"` 
 
 ### Prerequisites
 
-- **Vlang** (>= 0.4.x): [Installation instructions](https://github.com/vlang/v#installing-v-from-source)
+- **Vlang** (>= 0.5.x): [Installation instructions](https://github.com/vlang/v#installing-v-from-source)
 - **curl**: For fetching external data
 
 ### Build and run in development mode
@@ -169,7 +222,7 @@ Create a `Dockerfile`:
 FROM vlang/v:latest
 
 WORKDIR /app
-COPY main.v v.mod ./
+COPY main.v v.mod config.toml ./
 
 RUN v -prod -o cryptoapi main.v
 
@@ -190,8 +243,6 @@ docker run -d -p 3040:3040 --name cryptoapi cryptoapi
 Create a `docker-compose.yml`:
 
 ```yaml
-version: '3.8'
-
 services:
   cryptoapi:
     build: .
@@ -199,13 +250,16 @@ services:
       - "3040:3040"
     restart: unless-stopped
     volumes:
-      - ./cache:/tmp
+      - cryptoapi-data:/var/lib/cryptoapi   # persistent price cache
+
+volumes:
+  cryptoapi-data:
 ```
 
 Run:
 
 ```bash
-docker-compose up -d
+docker compose up -d
 ```
 
 ### Deployment on VPS (e.g., DigitalOcean, Hetzner)
@@ -261,10 +315,19 @@ http GET localhost:3040/prices
 
 ### Monitor logs
 
-The server displays logs in the terminal:
-- Server initialization
-- Price updates
-- Any errors
+Run standalone, logs go to the terminal. Under systemd:
+
+```bash
+sudo journalctl -u cryptoapi -f
+```
+
+You should see price updates every 5 minutes, and warnings like `API fetch incomplete` or `keeping last known prices` when a source fails.
+
+### Check the cache
+
+```bash
+cat /var/lib/cryptoapi/prices.json
+```
 
 ## Architecture
 
@@ -277,20 +340,26 @@ The server displays logs in the terminal:
 
 ### Problems Solved
 
-1. **Shared state**: vweb creates a new instance per request → Using a shared JSON file
-2. **HTTPS with V**: V's HTTP module blocks on HTTPS → Using `os.system()` with curl
-3. **Persistence**: Data survives restarts → Cache in `/var/lib/cryptoapi/prices.json`
+1. **Shared state**: veb handlers run per-request → price state is re-read from a shared JSON file on each request
+2. **HTTPS with V**: V's HTTP module blocks on HTTPS → Using `os.system()` with curl (`-fsS` so HTTP errors fail loudly)
+3. **Persistence**: Last known prices survive restarts and reboots → Cache in `/var/lib/cryptoapi/prices.json`
 
 ## Project Structure
 
 ```
 cryptoapi/
-├── main.v          # Main source code
-├── v.mod           # Module metadata
-├── .gitignore      # Files ignored by Git
-├── README.md       # This file
-└── cache/          # Cache directory (optional)
+├── main.v            # Main source code (single-file architecture)
+├── v.mod             # Module metadata
+├── build.sh          # Production build script (creates ./cryptoapi)
+├── config.toml       # Runtime configuration (port, interval, cache path, Grist)
+├── cryptoapi.service # systemd service file
+├── .gitignore        # Files ignored by Git
+├── README.md         # This file
+└── AGENTS.md         # Notes for AI coding agents
 ```
+
+Runtime files (not in the repo):
+- `/var/lib/cryptoapi/prices.json` — persistent price cache, created automatically
 
 ## Troubleshooting
 
@@ -303,6 +372,8 @@ lsof -ti:3040
 # If a process is running, kill it:
 kill -9 $(lsof -ti:3040)
 ```
+
+A malformed `config.toml` also aborts startup with an error — check the log output.
 
 ### Error "curl not found"
 
@@ -328,11 +399,13 @@ curl 'https://api.coinbase.com/v2/exchange-rates?currency=USD'
 curl 'https://api.kraken.com/0/public/Ticker?pair=XMRUSD'
 ```
 
-Check cache file:
+Check the cache file:
 
 ```bash
 cat /var/lib/cryptoapi/prices.json
 ```
+
+If `last_success_update` is older than `last_update`, at least one source is failing — check the logs for the failing endpoint (curl exit codes are logged with the error output).
 
 ### Error "v: command not found"
 

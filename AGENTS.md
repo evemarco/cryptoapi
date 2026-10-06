@@ -4,7 +4,7 @@ This document contains essential information for working with the cryptoapi Vlan
 
 ## Project Overview
 
-A REST API server written in Vlang that provides real-time cryptocurrency prices and exchange rates. The server fetches prices from external APIs (CoinGecko for crypto, Coinbase for EUR/USD, THB/USD, and VND/USD) and updates them every 5 minutes.
+A REST API server written in Vlang that provides real-time cryptocurrency prices and exchange rates. The server fetches prices from external APIs (Coinbase for crypto USD prices and fiat rates, Kraken for XMR) and updates them every 5 minutes. CoinGecko was dropped on 2026-09-29 (commit `142c388`) because it rejected requests from the hosting datacenter with HTTP 403.
 
 **Tech Stack**: Vlang (veb framework), JSON file-based caching, curl for HTTP requests
 **Listening Port**: 3040 (configurable in `config.toml`)
@@ -207,19 +207,19 @@ Response format:
     "DOGE": 0.102899,
     "XRP": 1.47,
     "POL": 0.111061,
-    "SOL": 87.29,
-    "ETH": 1976.84,
-    "EUR": 1.18699,
-    "THB": 0.03226,
-    "VND": 0.0000385
+    "SOL": 120.07,
+    "ETH": 2701.17,
+    "EUR": 1.1217,
+    "THB": 33.664,
+    "VND": 25991.49
   },
-  "last_update": "2026-03-02 12:48:22",
-  "last_success_update": "2026-03-02 12:48:22"
+  "last_update": "2026-10-06 05:02:54",
+  "last_success_update": "2026-10-06 05:02:54"
 }
 ```
 
 **Fields:**
-- `prices`: Map of currency symbols to USD values
+- `prices`: Map of currency symbols to values (crypto and EUR are USD per 1 unit; THB and VND are fiat per 1 USD)
 - `last_update`: Timestamp of the last update attempt (successful or not)
 - `last_success_update`: Timestamp of the last successful API fetch (preserved on fallback)
 
@@ -291,8 +291,8 @@ The `send_to_grist()` function sends 8 records with the following structure:
 - Records 4-8: DOGE, XRP, POL, SOL, ETH (crypto only)
 
 **Response handling:**
-- HTTP 200 with "null" response → Success (logs "Ok")
-- Any other response → Error logged with HTTP code and response body
+- curl exit 0 → Success (logs "Sent prices to Grist")
+- Any other exit code → Error logged as `Grist update failed (curl exit N): <stderr>`
 
 **Grist request format:**
 ```json
@@ -317,7 +317,7 @@ The `send_to_grist()` function sends 8 records with the following structure:
 - `coin`: Currency symbol (BTC, ETH, etc.)
 - `usd`: USD price value
 - `fiat`: Associated fiat currency (EUR, THB, VND, USD, or null)
-- `fiat_usd`: Fiat to USD exchange rate
+- `fiat_usd`: Fiat rate in units of fiat per 1 USD (for the BTC record, `1 / EUR` rate, i.e. EUR per USD)
 - `last_success_update`: Timestamp of successful data fetch
 
 **To update Grist configuration:**
@@ -329,8 +329,8 @@ The `send_to_grist()` function sends 8 records with the following structure:
 
 - **veb**: V's builtin web framework (imported as `veb`)
 - **curl**: System curl binary (for HTTP requests to external APIs)
-- **Coinbase API**: https://api.coinbase.com/v2/exchange-rates (crypto USD + fiat EUR base) and **Kraken API**: https://api.kraken.com/0/public/Ticker (XMR)
-- **Coinbase API**: https://api.coinbase.com/v2/exchange-rates
+- **Coinbase API**: https://api.coinbase.com/v2/exchange-rates (crypto USD base + fiat EUR base)
+- **Kraken API**: https://api.kraken.com/0/public/Ticker (XMR, delisted from Coinbase)
 
 ## Systemd Service
 
@@ -381,7 +381,7 @@ sudo systemctl stop cryptoapi
 1. **Port 3040 in use**: Kill existing process with `kill -9 $(lsof -ti:3040)`
 2. **curl not found**: Install curl with package manager (apt, brew, yum)
 3. **Prices not updating**: Check internet connectivity and API endpoints
-4. **Permission denied on /tmp/**crypto_prices.json**: Check write permissions
+4. **Permission denied on the cache file** (default `/var/lib/cryptoapi/prices.json`): check write permissions on the directory (the server creates it with `mkdir_all` at startup)
 5. **V not found**: Install Vlang from https://github.com/vlang/v
 6. **Missing new currency/rate in API response**: The cache file `/var/lib/cryptoapi/prices.json` may contain old data without newly added currencies. After adding new currencies/rates to the code, either:
    - Delete the cache: `rm /var/lib/cryptoapi/prices.json` and restart
@@ -419,6 +419,6 @@ cat /var/lib/cryptoapi/prices.json
 ## Deployment Notes
 
 - Binary output should be named `cryptoapi` (as per .gitignore)
-- Uses `/tmp` for caching (ensure persistence is acceptable or change path)
+- Cache lives in `/var/lib/cryptoapi/prices.json` by default (persistent across restarts and reboots; configurable via `prices_file`)
 - Requires curl installed on deployment target
 - Can run standalone without additional files
