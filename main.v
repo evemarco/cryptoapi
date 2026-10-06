@@ -21,7 +21,8 @@ pub struct Config {
 	update_interval_seconds int    = 300
 	prices_file             string = '/var/lib/cryptoapi/prices.json'
 	grist_api_url           string = 'https://grist.dedimarco.com/api/docs/pgozipRBTC2UkXzdRM6ixp/tables/Coins/records'
-	grist_bearer_token      string = 'c749fb13bb8bbeafb5841d54e4c6c05011aa51c9'
+	// Secret: only ever set via config.toml (gitignored), never hardcoded here.
+	grist_bearer_token      string
 }
 
 fn load_config() Config {
@@ -332,6 +333,10 @@ fn curl_get(url string) string {
 }
 
 fn send_to_grist(cfg Config, prices map[string]f64, last_success_update string) {
+	if cfg.grist_bearer_token == '' {
+		log.error('Grist bearer token not configured (set grist_bearer_token in config.toml), skipping Grist update')
+		return
+	}
 	btc_value := prices['BTC'] or { 0.0 }
 	bnb_value := prices['BNB'] or { 0.0 }
 	xmr_value := prices['XMR'] or { 0.0 }

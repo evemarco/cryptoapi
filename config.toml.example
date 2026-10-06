@@ -1,4 +1,10 @@
 # Configuration de cryptoapi — toute clé absente conserve sa valeur par défaut.
+#
+# Copiez ce fichier vers config.toml puis renseignez le token :
+#   cp config.toml.example config.toml
+#
+# config.toml n'est PAS suivi par git (il contient le token Grist) ;
+# ce fichier d'exemple, lui, est suivi et ne doit contenir aucun secret réel.
 
 # Port d'écoute du serveur HTTP
 port = 3040
@@ -11,5 +17,5 @@ update_interval_seconds = 300
 prices_file = "/var/lib/cryptoapi/prices.json"
 
 # API Grist : mise à jour du tableau Coins après chaque fetch réussi
-grist_api_url = "https://grist.dedimarco.com/api/docs/pgozipRBTC2UkXzdRM6ixp/tables/Coins/records"
-grist_bearer_token = "c749fb13bb8bbeafb5841d54e4c6c05011aa51c9"
+grist_api_url = "https://grist.example.com/api/docs/<doc_id>/tables/Coins/records"
+grist_bearer_token = "REPLACE_WITH_YOUR_GRIST_TOKEN"

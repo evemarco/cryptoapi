@@ -180,7 +180,7 @@ fn curl_get(url string) string {
 
 ## Runtime Configuration (`config.toml`)
 
-Settings are loaded from `config.toml` in the working directory at startup — no recompile needed. Missing file or missing keys fall back to the defaults declared in the `Config` struct in `main.v`:
+Settings are loaded from `config.toml` in the working directory at startup — no recompile needed. Missing file or missing keys fall back to the defaults declared in the `Config` struct in `main.v`. `config.toml` is **gitignored** because it holds the Grist bearer token — never hardcode credentials in `main.v` (the tracked template is `config.toml.example`):
 
 ```toml
 port = 3040                      # HTTP listen port
@@ -281,7 +281,7 @@ The server automatically sends price updates to a Grist table via PATCH requests
 
 **Configuration:**
 - `grist_api_url`: Grist API endpoint for the Coins table (set in `config.toml`)
-- `grist_bearer_token`: Bearer token for API authentication (set in `config.toml`)
+- `grist_bearer_token`: Bearer token for API authentication (set in `config.toml`, which is gitignored; if empty, Grist updates are skipped with an error logged)
 
 **Data sent to Grist:**
 The `send_to_grist()` function sends 8 records with the following structure:

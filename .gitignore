@@ -29,3 +29,6 @@ server.log
 
 # oh-my-opencode plugin artifacts
 .omo/
+
+# Local runtime config — contains the Grist bearer token, never push it
+config.toml

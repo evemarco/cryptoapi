@@ -87,9 +87,17 @@ After each successful fetch, the server sends a PATCH with 8 records to the Gris
 
 Every record carries `last_success_update`. Required columns in the Grist table: `coin`, `usd`, `fiat`, `fiat_usd`, `last_success_update`. A failed Grist call is logged but does not affect the prices cache.
 
+The bearer token lives only in the gitignored `config.toml` (never in source code). If it is missing or empty, Grist updates are skipped with an error logged.
+
 ## Configuration
 
 Runtime settings live in `config.toml` (in the working directory) — edit and restart the service, no recompile needed. Any missing key falls back to its default value; if the file is missing entirely, all defaults are used.
+
+`config.toml` holds the Grist bearer token and is **not tracked by git**. Copy the tracked template and fill in your values:
+
+```bash
+cp config.toml.example config.toml
+```
 
 ```toml
 port = 3040                                  # HTTP listen port
