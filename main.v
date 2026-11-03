@@ -127,8 +127,8 @@ fn update_prices_loop(cfg Config) {
 
 // Used only before the first successful fetch ever (missing or unreadable
 // cache file); live updates never reset to these values. Key directions follow
-// the live fetch code: 'EUR' is USD per 1 EUR, 'THB' and 'VND' are units of
-// fiat per 1 USD.
+// the live fetch code: 'EUR' is USD per 1 EUR, 'THB', 'VND' and 'MYR' are
+// units of fiat per 1 USD.
 fn static_fallback_prices() map[string]f64 {
 	return {
 		'BTC':  69763.0
@@ -142,6 +142,8 @@ fn static_fallback_prices() map[string]f64 {
 		'EUR':  1.1865
 		'THB':  32.89
 		'VND':  25974.0
+		// Approximate MYR per 1 USD
+		'MYR':  4.20
 	}
 }
 
@@ -296,7 +298,7 @@ fn fetch_kraken_xmr() f64 {
 }
 
 // Fiat rates from the EUR-base Coinbase response. 'EUR' is stored as USD per
-// 1 EUR; 'THB' and 'VND' are units of fiat per 1 USD.
+// 1 EUR; 'THB', 'VND' and 'MYR' are units of fiat per 1 USD.
 fn fetch_fiat_prices() map[string]f64 {
 	mut prices := map[string]f64{}
 	body := curl_get('https://api.coinbase.com/v2/exchange-rates?currency=EUR')
@@ -316,6 +318,9 @@ fn fetch_fiat_prices() map[string]f64 {
 			}
 			if vnd_str := decoded.data.rates['VND'] {
 				prices['VND'] = round_price(vnd_str.f64() / usd_per_eur)
+			}
+			if myr_str := decoded.data.rates['MYR'] {
+				prices['MYR'] = round_price(myr_str.f64() / usd_per_eur)
 			}
 		}
 	}
@@ -361,6 +366,7 @@ fn send_to_grist(cfg Config, prices map[string]f64, last_success_update string) 
 	eur_value := round_price(1 / prices['EUR'] or { 0.0 })
 	thb_value := prices['THB'] or { 0.0 }
 	vnd_value := prices['VND'] or { 0.0 }
+	myr_value := prices['MYR'] or { 0.0 }
 
 	json_payload := '{
   "records": [
@@ -399,8 +405,8 @@ fn send_to_grist(cfg Config, prices map[string]f64, last_success_update string) 
       "fields": {
         "coin": "DOGE",
         "usd": ${doge_value},
-        "fiat": "USD",
-        "fiat_usd": 1.0,
+        "fiat": "MYR",
+        "fiat_usd": ${myr_value},
         "last_success_update": "${last_success_update}"
       }
     },
@@ -409,8 +415,8 @@ fn send_to_grist(cfg Config, prices map[string]f64, last_success_update string) 
       "fields": {
         "coin": "XRP",
         "usd": ${xrp_value},
-        "fiat": null,
-        "fiat_usd": 0.0,
+        "fiat": "USD",
+        "fiat_usd": 1.0,
         "last_success_update": "${last_success_update}"
       }
     },

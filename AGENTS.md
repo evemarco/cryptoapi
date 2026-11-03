@@ -211,7 +211,8 @@ Response format:
     "ETH": 2701.17,
     "EUR": 1.1217,
     "THB": 33.664,
-    "VND": 25991.49
+    "VND": 25991.49,
+    "MYR": 4.2017
   },
   "last_update": "2026-10-06 05:02:54",
   "last_success_update": "2026-10-06 05:02:54"
@@ -219,7 +220,7 @@ Response format:
 ```
 
 **Fields:**
-- `prices`: Map of currency symbols to values (crypto and EUR are USD per 1 unit; THB and VND are fiat per 1 USD)
+- `prices`: Map of currency symbols to values (crypto and EUR are USD per 1 unit; THB, VND and MYR are fiat per 1 USD)
 - `last_update`: Timestamp of the last update attempt (successful or not)
 - `last_success_update`: Timestamp of the last successful API fetch (preserved on fallback)
 
@@ -290,7 +291,9 @@ The `send_to_grist()` function sends 8 records with the following structure:
 - Record 1: BTC with EUR fiat rate
 - Record 2: BNB with THB fiat rate
 - Record 3: XMR with VND fiat rate
-- Records 4-8: DOGE, XRP, POL, SOL, ETH (crypto only)
+- Record 4: DOGE with MYR fiat rate
+- Record 5: XRP with USD fiat (fiat_usd = 1.0)
+- Records 6-8: POL, SOL, ETH (crypto only)
 
 **Response handling:**
 - curl exit 0 → Success (logs "Sent prices to Grist")
@@ -318,7 +321,7 @@ The `send_to_grist()` function sends 8 records with the following structure:
 **Required Grist columns:**
 - `coin`: Currency symbol (BTC, ETH, etc.)
 - `usd`: USD price value
-- `fiat`: Associated fiat currency (EUR, THB, VND, USD, or null)
+- `fiat`: Associated fiat currency (EUR, THB, VND, MYR, or null)
 - `fiat_usd`: Fiat rate in units of fiat per 1 USD (for the BTC record, `1 / EUR` rate, i.e. EUR per USD)
 - `last_success_update`: Timestamp of successful data fetch
 

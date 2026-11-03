@@ -5,7 +5,7 @@ A simple REST API server written in Vlang that provides real-time cryptocurrency
 ## Features
 
 - **Tracked Cryptocurrencies**: BTC, ETH, XMR (Monero), BNB, SOL, XRP, DOGE, POL
-- **Exchange Rates**: EUR (USD per 1 EUR), THB and VND (fiat per 1 USD)
+- **Exchange Rates**: EUR (USD per 1 EUR), THB, VND and MYR (fiat per 1 USD)
 - **Automatic Updates**: Prices fetched every 5 minutes by default (configurable)
 - **External APIs**: Coinbase (crypto USD prices + fiat rates) and Kraken (XMR only)
 - **Resilience**: On a failed or incomplete fetch, the last known prices are served instead of stale hard-coded values
@@ -34,7 +34,8 @@ Returns all current prices with metadata (both routes are identical).
     "ETH": 2701.17,
     "EUR": 1.1217,
     "THB": 33.664,
-    "VND": 25991.49
+    "VND": 25991.49,
+    "MYR": 4.2017
   },
   "last_update": "2026-10-06 05:02:54",
   "last_success_update": "2026-10-06 05:02:54"
@@ -50,14 +51,14 @@ Returns all current prices with metadata (both routes are identical).
 
 | Source | Used for | Endpoint |
 |---|---|---|
-| Coinbase exchange-rates | Crypto USD prices (BTC, ETH, SOL, XRP, DOGE, BNB, POL) and fiat rates (EUR, THB, VND) | `https://api.coinbase.com/v2/exchange-rates?currency=USD` and `?currency=EUR` |
+| Coinbase exchange-rates | Crypto USD prices (BTC, ETH, SOL, XRP, DOGE, BNB, POL) and fiat rates (EUR, THB, VND, MYR) | `https://api.coinbase.com/v2/exchange-rates?currency=USD` and `?currency=EUR` |
 | Kraken ticker | XMR (delisted from Coinbase) | `https://api.kraken.com/0/public/Ticker?pair=XMRUSD` |
 
 **Price semantics** (directions follow the live fetch code):
 
 - Crypto: Coinbase returns units of crypto per 1 USD; the value is inverted, so `prices["BTC"]` is USD per 1 BTC.
 - `EUR`: USD per 1 EUR (e.g. `1.1217`).
-- `THB`, `VND`: units of fiat per 1 USD (e.g. `33.664` THB per USD), derived from the EUR-base Coinbase response.
+- `THB`, `VND`, `MYR`: units of fiat per 1 USD (e.g. `33.664` THB per USD), derived from the EUR-base Coinbase response.
 - XMR comes from Kraken's last trade price (`c[0]`).
 - All values are rounded to 6 significant digits, clamped to 2–6 decimals, to remove float noise from the inversions.
 
@@ -82,8 +83,9 @@ After each successful fetch, the server sends a PATCH with 8 records to the Gris
 | 1 | BTC | EUR | 1 / EUR rate |
 | 2 | BNB | THB | THB rate |
 | 3 | XMR | VND | VND rate |
-| 4 | DOGE | USD | 1.0 |
-| 5–8 | XRP, POL, SOL, ETH | null | 0.0 |
+| 4 | DOGE | MYR | MYR rate |
+| 5 | XRP | USD | 1.0 |
+| 6–8 | POL, SOL, ETH | null | 0.0 |
 
 Every record carries `last_success_update`. Required columns in the Grist table: `coin`, `usd`, `fiat`, `fiat_usd`, `last_success_update`. A failed Grist call is logged but does not affect the prices cache.
 
